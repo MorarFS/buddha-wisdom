@@ -20,3 +20,5 @@ pypdf
 numpy
 tqdm
 flask-cors
+google-cloud-logging
+
