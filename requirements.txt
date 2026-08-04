@@ -1,0 +1,22 @@
+# Web framework and server
+Flask==3.1.0
+Werkzeug==3.1.0
+Jinja2==3.1.5
+gunicorn==20.1.0
+
+# Google AI for Buddha wisdom generation
+google-genai==1.10.0
+google-api-core==2.24.0
+googleapis-common-protos==1.66.0
+grpcio==1.67.1
+protobuf==4.25.5
+
+# HTTP and utilities
+requests==2.32.3
+markdown==3.7
+
+# RAG dependencies
+pypdf
+numpy
+tqdm
+flask-cors
