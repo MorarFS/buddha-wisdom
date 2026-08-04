@@ -163,6 +163,19 @@
             // Set the backend API URL directly
             const backendUrl = "https://buddha-wisdom-465121314425.us-central1.run.app/query";
 
+            // Geolocation lookup to track user origins
+            let userCountry = "Unknown";
+            fetch("https://ipapi.co/json/")
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.country_name) {
+                        userCountry = data.country_name;
+                    }
+                })
+                .catch(err => {
+                    console.warn("Could not determine user location:", err);
+                });
+
             function sendMessage() {
                 const message = inputBox.value.trim();
                 if (message === "") return;
@@ -184,7 +197,10 @@
                     headers: {
                         "Content-Type": "application/json"
                     },
-                    body: JSON.stringify({query: message})
+                    body: JSON.stringify({
+                        query: message,
+                        country: userCountry
+                    })
                 })
                 .then(response => response.json())
                 .then(data => {

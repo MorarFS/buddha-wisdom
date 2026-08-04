@@ -197,6 +197,19 @@ chat_template = """
             const chatbox = document.getElementById('chatbox');
             const loading = document.getElementById('loading');
 
+            // Geolocation lookup to track user origins
+            let userCountry = "Unknown";
+            fetch("https://ipapi.co/json/")
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.country_name) {
+                        userCountry = data.country_name;
+                    }
+                })
+                .catch(err => {
+                    console.warn("Could not determine user location:", err);
+                });
+
             function sendMessage() {
                 const message = inputBox.value.trim();
                 if (message === "") return;
@@ -218,7 +231,10 @@ chat_template = """
                     headers: {
                         "Content-Type": "application/json"
                     },
-                    body: JSON.stringify({query: message})
+                    body: JSON.stringify({
+                        query: message,
+                        country: userCountry
+                    })
                 })
                 .then(response => response.json())
                 .then(data => {
@@ -266,17 +282,19 @@ def index():
 @app.route("/query", methods=['POST'])
 def query():
     """Handles user queries, converts Markdown to HTML, and returns Buddha's response."""
-    data = request.get_json()
+    data = request.get_json() or {}
     user_query = data.get('query')
+    country = data.get('country', 'Unknown')
     if not user_query:
         return jsonify({'error': 'No query provided'}), 400
+    print(f"[METRIC] Query: '{user_query}' | Country: {country}", flush=True)
     try:
         response = buddha_wisdom(user_query)
         # Convert Markdown to HTML
         html_response = markdown(response)
         return jsonify({'response': html_response})
     except Exception as e:
-        print(f"Error in /query: {e}")
+        print(f"Error in /query: {e}", flush=True)
         return jsonify({'response': "I encountered an error processing your request."}), 500
 
 if __name__ == "__main__":
