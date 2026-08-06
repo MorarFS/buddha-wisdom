@@ -184,7 +184,10 @@
                 // Add the user message to the chatbox
                 const userMsg = document.createElement('div');
                 userMsg.classList.add('message', 'user');
-                userMsg.innerHTML = "<strong>You:</strong> " + message;
+                const userLabel = document.createElement('strong');
+                userLabel.textContent = "You: ";
+                userMsg.appendChild(userLabel);
+                userMsg.appendChild(document.createTextNode(message));
                 chatbox.appendChild(userMsg);
                 chatbox.scrollTop = chatbox.scrollHeight; // Scroll to bottom
 

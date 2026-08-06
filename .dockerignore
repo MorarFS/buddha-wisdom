@@ -7,3 +7,8 @@ __pycache__
 .github
 data
 test_models.py
+.env*
+logs
+scratch
+*.pem
+*.key

@@ -1,6 +1,16 @@
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 .DS_Store
 pkg/
-.env
+.env*
+logs/
+scratch/
+*.secret
+*.pem
+*.key
+*.json
+!requirements.txt
+!package.json
