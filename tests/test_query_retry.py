@@ -22,14 +22,24 @@ class QueryRetryTests(unittest.TestCase):
         client = SimpleNamespace(models=SimpleNamespace(generate_content=generate))
 
         with (
-            patch.object(query_module.genai, "Client", return_value=client, create=True),
-            patch.object(query_module, "retrieve_top_k_chunks", return_value="A passage"),
+            patch.object(query_module.genai, "Client", return_value=client, create=True) as client_factory,
+            patch.object(query_module, "retrieve_top_k_chunks", return_value="A passage") as retrieve,
             patch.object(query_module.time, "sleep"),
         ):
             answer = query_module.buddha_wisdom("What is dukkha?")
 
         self.assertEqual(answer, "A grounded answer.")
         self.assertEqual(generate.call_count, 2)
+        retrieve.assert_called_once_with(client, "What is dukkha?", k=8)
+        config = generate.call_args.kwargs["config"]
+        self.assertNotIn("thinking_config", config)
+        self.assertEqual(config["max_output_tokens"], 2048)
+        self.assertEqual(generate.call_args.kwargs["model"], "gemini-3.1-flash-lite")
+        client_factory.assert_any_call(
+            vertexai=True,
+            project=query_module.PROJECT_ID,
+            location="global",
+        )
 
     def test_raises_after_repeated_empty_answers(self):
         generate = unittest.mock.Mock(
