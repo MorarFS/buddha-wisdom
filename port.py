@@ -56,18 +56,16 @@ if not os.path.exists(LOCAL_IMAGE_DESTINATION):
         print(f"An unexpected error occurred while copying the image: {e}")
 
 # --- Authentication Configuration & Secure Secrets ---
-ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
-ADMIN_PASS = os.environ.get("ADMIN_PASS", "buddha2026")
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "buddha-secret-token-2026")
+ADMIN_USER = os.environ.get("ADMIN_USER")
+ADMIN_PASS = os.environ.get("ADMIN_PASS")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
-if "ADMIN_PASS" not in os.environ:
-    print("[NOTICE] ADMIN_PASS environment variable not set; using default admin password.", flush=True)
-if "ADMIN_TOKEN" not in os.environ:
-    print("[NOTICE] ADMIN_TOKEN environment variable not set; using default admin token.", flush=True)
+if not ADMIN_TOKEN and not (ADMIN_USER and ADMIN_PASS):
+    print("[NOTICE] Admin dashboard disabled until credentials are configured.", flush=True)
 
 def check_auth(username, password):
     """Verifies admin credentials."""
-    return secrets.compare_digest(username, ADMIN_USER) and secrets.compare_digest(password, ADMIN_PASS)
+    return bool(ADMIN_USER and ADMIN_PASS) and secrets.compare_digest(username, ADMIN_USER) and secrets.compare_digest(password, ADMIN_PASS)
 
 def authenticate():
     """Sends a 401 response that triggers HTTP Basic Authentication."""
@@ -81,10 +79,13 @@ def requires_auth(f):
     """Decorator to protect sensitive admin / log summary routes."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        if not ADMIN_TOKEN and not (ADMIN_USER and ADMIN_PASS):
+            return Response('Dashboard unavailable: configure admin credentials.', 503)
+
         # 1. Allow secret query token access (?token=...) or header (X-Admin-Token)
         token_arg = request.args.get('token')
         token_hdr = request.headers.get('X-Admin-Token')
-        if (token_arg and secrets.compare_digest(token_arg, ADMIN_TOKEN)) or (token_hdr and secrets.compare_digest(token_hdr, ADMIN_TOKEN)):
+        if ADMIN_TOKEN and ((token_arg and secrets.compare_digest(token_arg, ADMIN_TOKEN)) or (token_hdr and secrets.compare_digest(token_hdr, ADMIN_TOKEN))):
             return f(*args, **kwargs)
         
         # 2. HTTP Basic Auth
@@ -478,7 +479,7 @@ chat_template = """
 
             function sendMessage() {
                 const message = inputBox.value.trim();
-                if (message === "") return;
+                if (message === "" || sendButton.disabled) return;
                 inputBox.value = "";
 
                 // DOM XSS Safe Rendering
@@ -492,6 +493,9 @@ chat_template = """
                 chatbox.scrollTop = chatbox.scrollHeight;
 
                 loading.style.display = "block";
+                sendButton.disabled = true;
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 150000);
 
                 fetch("/query", {
                     method: "POST",
@@ -501,32 +505,40 @@ chat_template = """
                     body: JSON.stringify({
                         query: message,
                         country: userCountry
-                    })
+                    }),
+                    signal: controller.signal
                 })
-                .then(response => response.json())
-                .then(data => {
-                    loading.style.display = "none";
-                    if (data.error) {
-                        const errorMsg = document.createElement('div');
-                        errorMsg.classList.add('message', 'error');
-                        errorMsg.innerHTML = "<strong>Buddha:</strong> " + data.error;
-                        chatbox.appendChild(errorMsg);
-                    } else {
-                        const botMsg = document.createElement('div');
-                        botMsg.classList.add('message', 'buddha');
-                        botMsg.innerHTML = "<strong>Buddha:</strong> " + data.response;
-                        chatbox.appendChild(botMsg);
+                .then(async response => {
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.error || "The answer service is unavailable. Please try again.");
                     }
+                    if (!data.response) {
+                        throw new Error("The answer service returned an empty reply. Please try again.");
+                    }
+                    return data;
+                })
+                .then(data => {
+                    const botMsg = document.createElement('div');
+                    botMsg.classList.add('message', 'buddha');
+                    botMsg.innerHTML = "<strong>Buddha:</strong> " + data.response;
+                    chatbox.appendChild(botMsg);
                     chatbox.scrollTop = chatbox.scrollHeight;
                 })
                 .catch(error => {
-                    loading.style.display = "none";
                     console.error("Error:", error);
                     const errorMsg = document.createElement('div');
                     errorMsg.classList.add('message', 'error');
-                    errorMsg.innerHTML = "<strong>Buddha:</strong> I encountered an error.";
+                    errorMsg.textContent = error.name === "AbortError"
+                        ? "This answer is taking too long. Please try again."
+                        : error.message || "I encountered an error. Please try again.";
                     chatbox.appendChild(errorMsg);
                     chatbox.scrollTop = chatbox.scrollHeight;
+                })
+                .finally(() => {
+                    clearTimeout(timeout);
+                    loading.style.display = "none";
+                    sendButton.disabled = false;
                 });
             }
 
@@ -604,7 +616,7 @@ def query():
                 "error": str(e)
             }
         )
-        return jsonify({'response': "I encountered an error processing your request."}), 500
+        return jsonify({'error': "The answer service is temporarily unavailable. Please try again."}), 503
 
 # --- Private Log Summary Dashboard Template ---
 log_summary_template = """<!DOCTYPE html>

@@ -3,69 +3,33 @@ import os
 import time
 import pickle
 import numpy as np
+from response_utils import extract_response_text
 
 # Project configuration
 PROJECT_ID = "rag-projects-451405"
 LOCATION = "us-central1"
+GENERATION_LOCATION = "global"
+GENERATION_MODEL = "gemini-3.1-flash-lite"
 EMBEDDING_MODEL = "text-embedding-004"
 
 # Set environment variables
 os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] = PROJECT_ID
 
-# Enhanced system instruction balancing academic depth with Buddha's persona
-SYSTEM_INSTRUCTION = """You will be provided with the following RAG corpus:
+# Concise, source-grounded instructions for cited answers
+SYSTEM_INSTRUCTION = """Answer the question using only the Theravada sutta passages below.
 {sutta-corpus}
 
-Instructions for Buddha's Academic Wisdom:
+Write a clear answer of about 250 to 400 words. Begin with the direct answer.
+Use two or three short, relevant quotations when the passages support them.
+Give each quotation an exact citation using its source document, passage number,
+and sutta reference when one is present. Do not invent quotations or citations.
+Avoid repeating near-identical passages. Explain Buddhist terms in plain language
+and distinguish a passage's claim from your interpretation. Avoid em dashes.
+Close with a brief, compassionate practical reflection grounded in the cited passages.
 
-1. STRICT GROUNDING: You must answer the user's question based strictly and exclusively on the provided RAG corpus. Do not use external knowledge or pre-training information to answer. If the corpus lacks relevant passages on the query, state: "I cannot find teachings on this specific topic in the provided sutta corpus," and guide the questioner gently toward related topics found in the corpus.
+If the passages do not support an answer, say that you cannot find a teaching
+on this topic in the provided sutta corpus. Do not fill gaps from memory."""
 
-2. Retrieve EXTENSIVE, LONGER QUOTATIONS from the suttas that thoroughly address the query:
-   - Provide complete passages rather than brief excerpts
-   - Include contextual text around key terms 
-   - Retrieve multiple relevant quotations on the topic from different texts
-
-3. Format each quotation with its citation in a precise academic style:
-   - Present each quotation in its own paragraph
-   - Italicize Buddhist terminology (e.g., *bhava*, *dukkha*, *dhamma*)
-   - Every quotation and fact must be accompanied by a citation in parentheses at the end of the text.
-   - The citation must combine the source document name, passage number, and any specific internal sutta reference (e.g., SN 56.11, DN 1) found in the passage.
-   - Example Citation format: (Linked Discourses sujato 2025 01 25 5, Passage 3, SN 56.11)
-
-4. After presenting all quotations, provide an "Extended Teachings" section that:
-   - Explores the deeper meaning of these passages with wisdom and insight
-   - Connects these teachings to the questioner's life journey
-   - Explains complex philosophical concepts with clarity and compassion
-   - Bridges scholarly analysis with practical wisdom
-   - You must refer ONLY to the teachings and concepts directly present in the retrieved passages.
-
-5. Conclude with a "Summary of Wisdom" section that:
-   - Synthesizes the key insights from the suttas
-   - Offers guidance on how to apply these teachings
-   - Speaks directly to the questioner with warmth and compassion
-   - Encourages further contemplation and practice
-
-6. Balance academic precision with the Buddha's compassionate teaching style:
-   - Use precise terminology while remaining accessible
-   - Maintain scholarly accuracy while speaking from the heart
-   - Address the questioner directly at times with gentle guidance
-   - Embody both the scholar and the spiritual teacher
-
-Example Format:
-# [Title: The Query Topic]
-
-[First quotation with proper formatting and terminology italicized] (Citation 1)
-
-[Second quotation with proper formatting and terminology italicized] (Citation 2)
-
-[Additional quotations as needed, each in its own paragraph with citation]
-
-## Extended Teachings
-[Deep exploration of the quotations, connecting scholarly understanding with compassionate guidance, strictly grounded in the texts]
-
-## Summary of Wisdom
-[Synthesis of insights that speaks directly to the questioner with Buddha's compassion]
-"""
 
 # Global variable to cache the index in memory
 _sutta_index = None
@@ -83,7 +47,7 @@ def get_sutta_index():
         print(f"Loaded index containing {len(_sutta_index['texts'])} passages.")
     return _sutta_index
 
-def retrieve_top_k_chunks(client, query, k=30):
+def retrieve_top_k_chunks(client, query, k=8):
     """Embeds the query and uses numpy to find the top k matching chunks."""
     index = get_sutta_index()
     
@@ -116,9 +80,9 @@ def retrieve_top_k_chunks(client, query, k=30):
     return corpus_text
 
 def buddha_wisdom(question):
-    """Generate comprehensive, compassionate Buddha-like wisdom with academic depth."""
+    """Generate concise answers grounded in cited sutta passages."""
     print("Initializing Google GenAI client...")
-    client = genai.Client(
+    embedding_client = genai.Client(
         vertexai=True,
         project=PROJECT_ID,
         location=LOCATION,
@@ -126,7 +90,12 @@ def buddha_wisdom(question):
     
     # 1. Retrieve most similar sutta passages locally
     print("Performing semantic search on local index...")
-    rag_corpus_text = retrieve_top_k_chunks(client, question, k=30)
+    rag_corpus_text = retrieve_top_k_chunks(embedding_client, question, k=8)
+    generation_client = genai.Client(
+        vertexai=True,
+        project=PROJECT_ID,
+        location=GENERATION_LOCATION,
+    )
     
     # 2. Inject RAG corpus text into system instructions
     formatted_instruction = SYSTEM_INSTRUCTION.replace("{sutta-corpus}", rag_corpus_text)
@@ -141,36 +110,34 @@ def buddha_wisdom(question):
     config = {
         "temperature": 0.25,
         "top_p": 0.95,
-        "max_output_tokens": 8192,
+        "max_output_tokens": 2048,
         "system_instruction": {"text": formatted_instruction}
     }
     
     # Make the API call with error handling and retries
-    max_retries = 3
+    max_retries = 2
     retry_delay = 2  # seconds
     
     for attempt in range(1, max_retries + 1):
         try:
-            print(f"Generating Buddha's wisdom with Gemini 2.5 (attempt {attempt}/{max_retries})...")
+            print(f"Generating Buddha's wisdom with Gemini 3.1 Flash-Lite (attempt {attempt}/{max_retries})...")
             
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
+            response = generation_client.models.generate_content(
+                model=GENERATION_MODEL,
                 contents=contents,
                 config=config
             )
-            print("Response received successfully from Gemini 2.5.")
+            print("Response received successfully from Gemini 3.1 Flash-Lite.")
             
-            # Extract text
-            if hasattr(response, 'text'):
-                return response.text
-            elif hasattr(response, 'candidates') and response.candidates:
-                candidate = response.candidates[0]
-                if hasattr(candidate, 'content') and candidate.content:
-                    content = candidate.content
-                    if hasattr(content, 'parts') and content.parts:
-                        return content.parts[0].text
-            
-            return str(response)
+            answer = extract_response_text(response)
+            if answer:
+                return answer
+
+            reasons = [
+                str(candidate.finish_reason)
+                for candidate in (getattr(response, "candidates", None) or [])
+            ]
+            raise RuntimeError(f"Gemini returned no answer (finish reasons: {reasons})")
                 
         except Exception as e:
             print(f"Error generating content (attempt {attempt}/{max_retries}): {e}")
@@ -179,7 +146,7 @@ def buddha_wisdom(question):
                 time.sleep(retry_delay)
                 retry_delay *= 2  # Exponential backoff
             else:
-                return f"After {max_retries} attempts, I was unable to retrieve wisdom from the suttas. Error: {str(e)}"
+                raise
 
 def main():
     """Interactive Buddha wisdom session with academic depth."""
@@ -190,7 +157,7 @@ def main():
     print("🪷  BUDDHA'S WISDOM WITH CITATIONS (LOCAL RAG)  🪷")
     print("═" * 80)
     print("\nSeek wisdom through questions about dharma, suffering, enlightenment, and more.")
-    print("Receive compassionate guidance with extensive quotes and scholarly depth.")
+    print("Receive clear guidance grounded in cited sutta passages.")
     print("Type 'exit' to end your session.\n")
     
     # Warm up index loading
