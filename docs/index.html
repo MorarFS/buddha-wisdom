@@ -178,7 +178,7 @@
 
             function sendMessage() {
                 const message = inputBox.value.trim();
-                if (message === "") return;
+                if (message === "" || sendButton.disabled) return;
                 inputBox.value = "";
 
                 // Add the user message to the chatbox
@@ -191,10 +191,12 @@
                 chatbox.appendChild(userMsg);
                 chatbox.scrollTop = chatbox.scrollHeight; // Scroll to bottom
 
-                // Show the loading animation
+                // Show progress and prevent duplicate, costly requests.
                 loading.style.display = "block";
+                sendButton.disabled = true;
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 150000);
 
-                // Send the message to the backend
                 fetch(backendUrl, {
                     method: "POST",
                     headers: {
@@ -203,29 +205,41 @@
                     body: JSON.stringify({
                         query: message,
                         country: userCountry
-                    })
+                    }),
+                    signal: controller.signal
                 })
-                .then(response => response.json())
+                .then(async response => {
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.error || "The answer service is unavailable. Please try again.");
+                    }
+                    if (!data.response) {
+                        throw new Error("The answer service returned an empty reply. Please try again.");
+                    }
+                    return data;
+                })
                 .then(data => {
-                    // Hide the loading animation
-                    loading.style.display = "none";
-
                     const botMsg = document.createElement('div');
                     botMsg.classList.add('message', 'buddha');
                     botMsg.innerHTML = "<strong>Buddha:</strong> " + data.response;
                     chatbox.appendChild(botMsg);
-                    chatbox.scrollTop = chatbox.scrollHeight; // Scroll to bottom
+                    chatbox.scrollTop = chatbox.scrollHeight;
                 })
                 .catch(error => {
-                    // Hide the loading animation
-                    loading.style.display = "none";
-
                     console.error("Error:", error);
                     const errorMsg = document.createElement('div');
                     errorMsg.classList.add('message', 'error');
-                    errorMsg.innerHTML = "<strong>Buddha:</strong> I encountered an error.";
+                    const errorText = error.name === "AbortError"
+                        ? "This answer is taking too long. Please try again."
+                        : error.message || "I encountered an error. Please try again.";
+                    errorMsg.textContent = errorText;
                     chatbox.appendChild(errorMsg);
-                    chatbox.scrollTop = chatbox.scrollHeight; // Scroll to bottom
+                    chatbox.scrollTop = chatbox.scrollHeight;
+                })
+                .finally(() => {
+                    clearTimeout(timeout);
+                    loading.style.display = "none";
+                    sendButton.disabled = false;
                 });
             }
 

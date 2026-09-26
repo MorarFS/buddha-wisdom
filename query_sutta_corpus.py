@@ -3,6 +3,7 @@ import os
 import time
 import pickle
 import numpy as np
+from response_utils import extract_response_text
 
 # Project configuration
 PROJECT_ID = "rag-projects-451405"
@@ -146,7 +147,7 @@ def buddha_wisdom(question):
     }
     
     # Make the API call with error handling and retries
-    max_retries = 3
+    max_retries = 2
     retry_delay = 2  # seconds
     
     for attempt in range(1, max_retries + 1):
@@ -160,17 +161,15 @@ def buddha_wisdom(question):
             )
             print("Response received successfully from Gemini 2.5.")
             
-            # Extract text
-            if hasattr(response, 'text'):
-                return response.text
-            elif hasattr(response, 'candidates') and response.candidates:
-                candidate = response.candidates[0]
-                if hasattr(candidate, 'content') and candidate.content:
-                    content = candidate.content
-                    if hasattr(content, 'parts') and content.parts:
-                        return content.parts[0].text
-            
-            return str(response)
+            answer = extract_response_text(response)
+            if answer:
+                return answer
+
+            reasons = [
+                str(candidate.finish_reason)
+                for candidate in (getattr(response, "candidates", None) or [])
+            ]
+            raise RuntimeError(f"Gemini returned no answer (finish reasons: {reasons})")
                 
         except Exception as e:
             print(f"Error generating content (attempt {attempt}/{max_retries}): {e}")
@@ -179,7 +178,7 @@ def buddha_wisdom(question):
                 time.sleep(retry_delay)
                 retry_delay *= 2  # Exponential backoff
             else:
-                return f"After {max_retries} attempts, I was unable to retrieve wisdom from the suttas. Error: {str(e)}"
+                raise
 
 def main():
     """Interactive Buddha wisdom session with academic depth."""
