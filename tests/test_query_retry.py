@@ -14,21 +14,29 @@ with patch.dict(sys.modules, {"google": google, "google.genai": google.genai, "n
 
 class QueryRetryTests(unittest.TestCase):
     def test_retries_an_empty_answer(self):
+        corpus = (
+            "[Passage 1] (Source: Linked Discourses, Relevance: 0.9000):\n"
+            "Mendicants, suffering has an origin and a cessation.\n"
+        )
+        grounded_answer = (
+            "> Mendicants, suffering has an origin and a cessation.\n\n"
+            "**Source:** Linked Discourses; **Retrieved passage:** Passage 1."
+        )
         responses = [
             SimpleNamespace(text=None, candidates=[]),
-            SimpleNamespace(text="A grounded answer.", candidates=[]),
+            SimpleNamespace(text=grounded_answer, candidates=[]),
         ]
         generate = unittest.mock.Mock(side_effect=responses)
         client = SimpleNamespace(models=SimpleNamespace(generate_content=generate))
 
         with (
             patch.object(query_module.genai, "Client", return_value=client, create=True) as client_factory,
-            patch.object(query_module, "retrieve_top_k_chunks", return_value="A passage") as retrieve,
+            patch.object(query_module, "retrieve_top_k_chunks", return_value=(corpus, {})) as retrieve,
             patch.object(query_module.time, "sleep"),
         ):
             answer = query_module.buddha_wisdom("What is dukkha?")
 
-        self.assertEqual(answer, "A grounded answer.")
+        self.assertEqual(answer, grounded_answer)
         self.assertEqual(generate.call_count, 2)
         retrieve.assert_called_once_with(client, "What is dukkha?", k=8)
         config = generate.call_args.kwargs["config"]
@@ -49,7 +57,7 @@ class QueryRetryTests(unittest.TestCase):
 
         with (
             patch.object(query_module.genai, "Client", return_value=client, create=True),
-            patch.object(query_module, "retrieve_top_k_chunks", return_value="A passage"),
+            patch.object(query_module, "retrieve_top_k_chunks", return_value=("A passage", {})),
             patch.object(query_module.time, "sleep"),
         ):
             with self.assertRaisesRegex(RuntimeError, "no answer"):
