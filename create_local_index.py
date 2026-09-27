@@ -148,7 +148,8 @@ def build_index():
     index_data = {
         "texts": texts,
         "sources": sources,
-        "embeddings": embeddings_arr
+        "embeddings": embeddings_arr,
+        "chunk_stride": CHUNK_SIZE - CHUNK_OVERLAP,
     }
     
     print(f"Saving index to {INDEX_FILE}...")
