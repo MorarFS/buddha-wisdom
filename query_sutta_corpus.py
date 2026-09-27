@@ -37,8 +37,8 @@ Choose complete sentences with enough context to understand them. Never extend
 a quotation beyond the supplied passage or repeat near-identical passages.
 
 Immediately after every blockquote, write a separate citation line in this form:
-**Source:** [the full Source name supplied above]; **Retrieved passage:**
-[the Passage number supplied above]; **Sutta page:** [SN 56.11](https://suttacentral.net/sn56.11/en/sujato).
+**Source:** SOURCE_NAME; **Retrieved passage:** Passage N; **Sutta page:**
+[SN 56.11](https://suttacentral.net/sn56.11/en/sujato).
 Copy the full Source name exactly. The Passage number is a search-result label,
 not a canonical sutta number. Include the linked Sutta page only when the
 internal sutta reference is clear from the quoted passage. If the reference

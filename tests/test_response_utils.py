@@ -66,8 +66,9 @@ class GroundedQuotationTests(unittest.TestCase):
     def test_adds_only_verified_pdf_pages(self):
         answer = (
             "> The noble truth of suffering is to be completely understood.\n\n"
-            "**Source:** Linked Discourses; **Retrieved passage:** Passage 2.\n"
+            "**Source:** Linked Discourses; **Retrieved passage:** [Passage 2].\n"
         )
+        self.assertTrue(quotations_are_grounded(answer, self.corpus))
         result = add_pdf_page_citations(answer, {2: (138, 139)})
         self.assertIn("**PDF pages:** 138-139.", result)
         self.assertEqual(add_pdf_page_citations(answer, {}), answer)

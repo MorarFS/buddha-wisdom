@@ -67,7 +67,7 @@ def quotations_are_grounded(answer, corpus):
 
         citation = re.search(
             r"\*\*Source:\*\*\s*(.*?)\s*;\s*"
-            r"\*\*Retrieved passage:\*\*\s*Passage\s+(\d+)",
+            r"\*\*Retrieved passage:\*\*\s*\[?Passage\s+(\d+)\]?",
             lines[index],
         )
         if not citation:
@@ -90,7 +90,9 @@ def add_pdf_page_citations(answer, pages_by_passage):
     """Append page ranges recovered from source footers to citation lines."""
     output = []
     for line in answer.splitlines(keepends=True):
-        match = re.search(r"\*\*Retrieved passage:\*\*\s*Passage\s+(\d+)", line)
+        match = re.search(
+            r"\*\*Retrieved passage:\*\*\s*\[?Passage\s+(\d+)\]?", line
+        )
         pages = pages_by_passage.get(int(match.group(1))) if match else None
         if pages and "**PDF page" not in line:
             content = line.rstrip("\r\n")
