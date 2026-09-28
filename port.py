@@ -442,6 +442,31 @@ chat_template = """
         .message strong {
             color: #8b4513;
         }
+        .passage-results {
+            margin-top: 18px;
+            border-top: 1px solid #d2b48c;
+            padding-top: 12px;
+        }
+        .passage-results summary { cursor: pointer; font-weight: bold; }
+        .passage-item {
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid #d2b48c;
+            border-radius: 6px;
+            background: #fffaf0;
+        }
+        .passage-item pre {
+            max-height: 420px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            font: inherit;
+            line-height: 1.5;
+            background: transparent;
+            padding: 0;
+        }
+        .passage-item a { display: inline-block; margin-top: 8px; }
+        .more-passages { margin-top: 12px; }
     </style>
 </head>
 <body>
@@ -476,6 +501,58 @@ chat_template = """
                 .catch(err => {
                     console.warn("Could not determine user location:", err);
                 });
+
+            function appendPassages(message, passages) {
+                if (!Array.isArray(passages) || passages.length === 0) return;
+                const section = document.createElement('details');
+                section.className = 'passage-results';
+                const title = document.createElement('summary');
+                title.textContent = `${passages.length} matching PDF excerpts from the suttas`;
+                section.appendChild(title);
+                const list = document.createElement('div');
+                section.appendChild(list);
+                const more = document.createElement('button');
+                more.type = 'button';
+                more.className = 'more-passages';
+                more.textContent = 'Show 10 more';
+                let shown = 0;
+
+                function showNext() {
+                    for (const passage of passages.slice(shown, shown + 10)) {
+                        const item = document.createElement('details');
+                        item.className = 'passage-item';
+                        const heading = document.createElement('summary');
+                        const [first, last] = passage.pdf_pages;
+                        const page = first === last ? `p. ${first}` : `pp. ${first}-${last}`;
+                        heading.textContent = `${passage.source} · PDF ${page}`;
+                        item.appendChild(heading);
+                        if (passage.sutta_reference) {
+                            const link = document.createElement('a');
+                            const slug = passage.sutta_reference.toLowerCase().split(' ').join('');
+                            link.href = `https://suttacentral.net/${slug}/en/sujato`;
+                            link.target = '_blank';
+                            link.rel = 'noopener noreferrer';
+                            link.textContent = `Read ${passage.sutta_reference} on SuttaCentral`;
+                            item.appendChild(link);
+                        }
+                        const excerpt = document.createElement('pre');
+                        excerpt.textContent = passage.text;
+                        item.appendChild(excerpt);
+                        list.appendChild(item);
+                    }
+                    shown = Math.min(shown + 10, passages.length);
+                    more.hidden = shown >= passages.length;
+                }
+
+                more.addEventListener('click', showNext);
+                section.addEventListener('toggle', () => {
+                    if (section.open && shown === 0) {
+                        showNext();
+                        section.appendChild(more);
+                    }
+                });
+                message.appendChild(section);
+            }
 
             function sendMessage() {
                 const message = inputBox.value.trim();
@@ -522,6 +599,7 @@ chat_template = """
                     const botMsg = document.createElement('div');
                     botMsg.classList.add('message', 'buddha');
                     botMsg.innerHTML = "<strong>Buddha:</strong> " + data.response;
+                    appendPassages(botMsg, data.passages);
                     chatbox.appendChild(botMsg);
                     chatbox.scrollTop = chatbox.scrollHeight;
                 })
@@ -585,7 +663,7 @@ def query():
 
     print(f"[METRIC] Query: '{user_query}' | Country: {country}", flush=True)
     try:
-        response = buddha_wisdom(user_query)
+        response, passages = buddha_wisdom(user_query, include_passages=True)
         html_response = markdown(response)
         elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
@@ -600,7 +678,7 @@ def query():
                 "status": 200
             }
         )
-        return jsonify({'response': html_response})
+        return jsonify({'response': html_response, 'passages': passages})
     except Exception as e:
         elapsed_ms = round((time.time() - start_time) * 1000, 1)
         print(f"Error in /query: {e}", flush=True)
