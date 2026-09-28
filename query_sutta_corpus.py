@@ -2,11 +2,12 @@ from google import genai
 import os
 import time
 import pickle
+import re
 import numpy as np
 from response_utils import (
     add_pdf_page_citations,
     extract_response_text,
-    quotations_are_grounded,
+    grounded_answer,
 )
 from source_pages import infer_pdf_page_ranges
 
@@ -40,11 +41,9 @@ Immediately after every blockquote, write a separate citation line in this form:
 **Source:** SOURCE_NAME; **Retrieved passage:** Passage N; **Sutta page:**
 [SN 56.11](https://suttacentral.net/sn56.11/en/sujato).
 Copy the full Source name exactly. The Passage number is a search-result label,
-not a canonical sutta number. Include the linked Sutta page only when the
-internal sutta reference is clear from the quoted passage. If the reference
-is unclear, omit the Sutta page field. The app adds verified PDF page numbers
-after generation, so do not supply PDF page numbers yourself. Never cite only
-a Passage number. Do not guess a sutta reference, quotation, or citation.
+not a canonical sutta number. The app adds Sutta links and verified PDF page
+numbers after generation, so do not supply page links or page numbers yourself.
+Never cite only a Passage number. Do not guess a quotation or citation.
 
 ## Extended Teachings
 Analyze what the quoted passages say and how they relate to the question.
@@ -79,8 +78,14 @@ def get_sutta_index():
         print(f"Loaded index containing {len(_sutta_index['texts'])} passages.")
     return _sutta_index
 
+SUTTA_MARKER = re.compile(
+    r"(?m)^\s*((SN|MN|DN|AN|Ud|Iti|Snp|Thag|Thig)\s*"
+    r"(\d+(?:\.\d+)?))\b"
+)
+
+
 def retrieve_top_k_chunks(client, query, k=8):
-    """Return retrieved text and verified PDF page ranges by result rank."""
+    """Prioritize actual sutta text with page evidence over PDF front matter."""
     index = get_sutta_index()
     
     # 1. Embed query
@@ -99,13 +104,45 @@ def retrieve_top_k_chunks(client, query, k=8):
     similarities = np.dot(index["embeddings"], query_vector)
     
     # 3. Get top k matching indices
-    top_indices = np.argsort(similarities)[::-1][:k]
+    top_indices = np.argsort(similarities)[::-1][:max(k * 8, 48)]
+
+    candidates = []
+    for idx in top_indices:
+        body = index["texts"][idx]
+        marker = SUTTA_MARKER.search(body)
+        if marker:
+            # A PDF chunk may begin in a preface or table of contents. Give
+            # Gemini only the text following a recognizable sutta heading.
+            chapter = marker.group(2) + marker.group(3).split(".")[0]
+            candidates.append((idx, body[marker.start():], chapter))
+
+    page_candidates = [
+        item for item in candidates if index["pdf_page_ranges"][item[0]]
+    ]
+    if len(page_candidates) >= 2:
+        candidates = page_candidates
+
+    # A broad question can otherwise return eight near-identical chunks of
+    # one chapter. Keep two per chapter before filling any remaining slots.
+    selected = []
+    chapter_counts = {}
+    for item in candidates:
+        chapter = item[2]
+        if chapter_counts.get(chapter, 0) < 2:
+            selected.append(item)
+            chapter_counts[chapter] = chapter_counts.get(chapter, 0) + 1
+        if len(selected) == k:
+            break
+    if len(selected) < k:
+        selected.extend(item for item in candidates if item not in selected)
+    selected = selected[:k]
+    if not selected:
+        selected = [(idx, index["texts"][idx], "") for idx in top_indices[:k]]
     
     # 4. Construct corpus text block and collect citations
     corpus_text = ""
     pages_by_passage = {}
-    for rank, idx in enumerate(top_indices):
-        text = index["texts"][idx]
+    for rank, (idx, text, _) in enumerate(selected):
         source = index["sources"][idx]
         sim = similarities[idx]
         corpus_text += f"\n[Passage {rank+1}] (Source: {source}, Relevance: {sim:.4f}):\n{text}\n"
@@ -155,6 +192,7 @@ def buddha_wisdom(question):
     # Make the API call with error handling and retries
     max_retries = 2
     retry_delay = 2  # seconds
+    best_grounded_answer = None
     
     for attempt in range(1, max_retries + 1):
         try:
@@ -174,8 +212,19 @@ def buddha_wisdom(question):
                 and "sutta corpus" in answer.lower()
                 and ">" not in answer
             )
-            if answer and (unsupported_topic or quotations_are_grounded(answer, rag_corpus_text)):
-                return add_pdf_page_citations(answer, pages_by_passage)
+            verified_answer = (
+                grounded_answer(answer, rag_corpus_text) if answer else None
+            )
+            if answer and (unsupported_topic or (
+                verified_answer
+                and verified_answer.count("**Retrieved passage:**") >= 2
+            )):
+                return add_pdf_page_citations(
+                    answer if unsupported_topic else verified_answer,
+                    pages_by_passage,
+                )
+            if verified_answer:
+                best_grounded_answer = verified_answer
 
             if answer:
                 raise RuntimeError("Gemini returned an unsupported quotation or citation")
@@ -193,6 +242,10 @@ def buddha_wisdom(question):
                 time.sleep(retry_delay)
                 retry_delay *= 2  # Exponential backoff
             else:
+                if best_grounded_answer:
+                    return add_pdf_page_citations(
+                        best_grounded_answer, pages_by_passage
+                    )
                 raise
 
 def main():

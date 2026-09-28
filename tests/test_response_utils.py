@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from response_utils import (
     add_pdf_page_citations,
     extract_response_text,
+    grounded_answer,
     quotations_are_grounded,
 )
 from source_pages import infer_pdf_page_ranges
@@ -72,6 +73,44 @@ class GroundedQuotationTests(unittest.TestCase):
         result = add_pdf_page_citations(answer, {2: (138, 139)})
         self.assertIn("**PDF pages:** 138-139.", result)
         self.assertEqual(add_pdf_page_citations(answer, {}), answer)
+
+    def test_pdf_running_header_does_not_break_exact_quote(self):
+        corpus = (
+            "[Passage 3] (Source: Linked Discourses sujato 2025 01 25 5, "
+            "Relevance: 0.9000):\n"
+            "SN 56.2\nRetreat\n“Mendicants, meditate in retreat. A mendicant "
+            "in retreat truly understands. They understand the ces-\n"
+            "a gentleman (1st)\nsation of suffering.”\n"
+        )
+        answer = (
+            "> Mendicants, meditate in retreat. A mendicant in retreat "
+            "truly understands. They understand the cessation of suffering.\n\n"
+            "**Source:** Linked Discourses; **Retrieved passage:** Passage 3; "
+            "**Sutta page:** [SN 56.11](https://suttacentral.net/sn56.11/en/sujato)."
+        )
+        verified = grounded_answer(answer, corpus)
+        self.assertIsNotNone(verified)
+        self.assertIn("Linked Discourses sujato 2025 01 25 5", verified)
+        self.assertIn("https://suttacentral.net/sn56.2/en/sujato", verified)
+        self.assertNotIn("sn56.11", verified)
+
+    def test_rejects_changed_words_even_with_pdf_header_allowance(self):
+        answer = (
+            "> The noble truth of suffering is to be completely ignored.\n\n"
+            "**Source:** Linked Discourses; **Retrieved passage:** Passage 2."
+        )
+        self.assertIsNone(grounded_answer(answer, self.corpus))
+
+    def test_drops_an_invented_quote_but_keeps_the_exact_one(self):
+        answer = (
+            "> The noble truth of suffering is to be completely understood.\n\n"
+            "**Source:** Linked Discourses; **Retrieved passage:** Passage 2.\n\n"
+            "> The noble truth of suffering is to be completely ignored.\n\n"
+            "**Source:** Linked Discourses; **Retrieved passage:** Passage 2."
+        )
+        verified = grounded_answer(answer, self.corpus)
+        self.assertIn("completely understood", verified)
+        self.assertNotIn("completely ignored", verified)
 
 
 class SourcePageTests(unittest.TestCase):
