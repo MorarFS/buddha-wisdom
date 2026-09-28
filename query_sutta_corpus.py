@@ -10,6 +10,7 @@ from response_utils import (
     grounded_answer,
 )
 from source_pages import infer_pdf_page_ranges
+from passage_search import matching_passages
 
 # Project configuration
 PROJECT_ID = "rag-projects-451405"
@@ -38,8 +39,7 @@ Choose complete sentences with enough context to understand them. Never extend
 a quotation beyond the supplied passage or repeat near-identical passages.
 
 Immediately after every blockquote, write a separate citation line in this form:
-**Source:** SOURCE_NAME; **Retrieved passage:** Passage N; **Sutta page:**
-[SN 56.11](https://suttacentral.net/sn56.11/en/sujato).
+**Source:** SOURCE_NAME; **Retrieved passage:** Passage N.
 Copy the full Source name exactly. The Passage number is a search-result label,
 not a canonical sutta number. The app adds Sutta links and verified PDF page
 numbers after generation, so do not supply page links or page numbers yourself.
@@ -84,7 +84,7 @@ SUTTA_MARKER = re.compile(
 )
 
 
-def retrieve_top_k_chunks(client, query, k=8):
+def retrieve_top_k_chunks(client, query, k=8, include_all=False):
     """Prioritize actual sutta text with page evidence over PDF front matter."""
     index = get_sutta_index()
     
@@ -150,9 +150,11 @@ def retrieve_top_k_chunks(client, query, k=8):
         if pages:
             pages_by_passage[rank + 1] = pages
         
+    if include_all:
+        return corpus_text, pages_by_passage, matching_passages(index, similarities)
     return corpus_text, pages_by_passage
 
-def buddha_wisdom(question):
+def buddha_wisdom(question, include_passages=False):
     """Generate quoted sutta passages followed by analysis and a summary."""
     print("Initializing Google GenAI client...")
     embedding_client = genai.Client(
@@ -163,9 +165,17 @@ def buddha_wisdom(question):
     
     # 1. Retrieve most similar sutta passages locally
     print("Performing semantic search on local index...")
-    rag_corpus_text, pages_by_passage = retrieve_top_k_chunks(
-        embedding_client, question, k=8
+    retrieval = retrieve_top_k_chunks(
+        embedding_client, question, k=8, **(
+            {"include_all": True} if include_passages else {}
+        )
     )
+    rag_corpus_text, pages_by_passage = retrieval[:2]
+    related_passages = retrieval[2] if include_passages else None
+
+    def finish(answer_text):
+        result = add_pdf_page_citations(answer_text, pages_by_passage)
+        return (result, related_passages) if include_passages else result
     generation_client = genai.Client(
         vertexai=True,
         project=PROJECT_ID,
@@ -219,10 +229,7 @@ def buddha_wisdom(question):
                 verified_answer
                 and verified_answer.count("**Retrieved passage:**") >= 2
             )):
-                return add_pdf_page_citations(
-                    answer if unsupported_topic else verified_answer,
-                    pages_by_passage,
-                )
+                return finish(answer if unsupported_topic else verified_answer)
             if verified_answer:
                 best_grounded_answer = verified_answer
 
@@ -243,9 +250,7 @@ def buddha_wisdom(question):
                 retry_delay *= 2  # Exponential backoff
             else:
                 if best_grounded_answer:
-                    return add_pdf_page_citations(
-                        best_grounded_answer, pages_by_passage
-                    )
+                    return finish(best_grounded_answer)
                 raise
 
 def main():
